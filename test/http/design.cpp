@@ -27,95 +27,169 @@ Parse states:
 
 */
 
-#if 0
 template<
     class SyncReadStream,
     class DynamicBuffer,
-    class Parser>
+    bool isRequest,
+    class Fields>
 void
-new_parse(
+parse_some(
     SyncReadStream& stream,
     DynamicBuffer& dynabuf,
-    Parser& parser,
+    header_parser<isRequest, Fields>& parser,
     error_code& ec)
 {
     static_assert(is_SyncReadStream<SyncReadStream>::value,
         "SyncReadStream requirements not met");
     static_assert(is_DynamicBuffer<DynamicBuffer>::value,
         "DynamicBuffer requirements not met");
-    static_assert(is_Parser<Parser>::value,
-        "Parser requirements not met");
-    for(;;)
+    BOOST_ASSERT(parser.need_more());
+    BOOST_ASSERT(! parser.is_done());
+    auto used =
+        parser.write(dynabuf.data(), ec);
+    if(ec)
+        return;
+    dynabuf.consume(used);
+    if(! parser.need_more())
+        break;
+    boost::optional<typename
+        DynamicBuffer::mutable_buffers_type> mb;
+    auto const size =
+        read_size_helper(dynabuf, 65536);
+    BOOST_ASSERT(size > 0);
+    try
     {
+        mb.emplace(dynabuf.prepare(size));
+    }
+    catch(std::length_error const&)
+    {
+        ec = error::buffer_overflow;
+        return;
+    }
+    dynabuf.commit(stream.read_some(*mb, ec));
+    if(ec == boost::asio::error::eof)
+    {
+        // Caller will see eof on next read.
+        ec = {};
+        parser.write_eof(ec);
+        if(ec)
+            return;
+        BOOST_ASSERT(! parser.need_more());
+        break;
+    }
+    if(ec)
+        return;
+}
+
+/** Parse some data from the stream.
+*/
+template<
+    class SyncReadStream,
+    class DynamicBuffer,
+    bool isRequest,
+    class Body,
+    class Fields>
+void
+parse_some(
+    SyncReadStream& stream,
+    DynamicBuffer& dynabuf,
+    message_parser<isRequest, Body, Fields>& parser,
+    error_code& ec)
+{
+    static_assert(is_SyncReadStream<SyncReadStream>::value,
+        "SyncReadStream requirements not met");
+    static_assert(is_DynamicBuffer<DynamicBuffer>::value,
+        "DynamicBuffer requirements not met");
+    BOOST_ASSERT(! parser.is_done());
+    // See if the parser needs more structured
+    // data in order to make forward progress
+    //
+    if(parser.need_more())
+    {
+        // Give the parser what we have already
+        //
         auto used =
             parser.write(dynabuf.data(), ec);
         if(ec)
             return;
         dynabuf.consume(used);
-        if(! parser.need_more())
-            break;
-        boost::optional<typename
-            DynamicBuffer::mutable_buffers_type> mb;
-        auto const size =
-            read_size_helper(dynabuf, 65536);
-        BOOST_ASSERT(size > 0);
-        try
+        if(parser.need_more())
         {
-            mb.emplace(dynabuf.prepare(size));
+            // Parser needs even more, try to read it
+            //
+            boost::optional<typename
+                DynamicBuffer::mutable_buffers_type> mb;
+            auto const size =
+                read_size_helper(dynabuf, 65536); // magic number?
+            BOOST_ASSERT(size > 0);
+            try
+            {
+                mb.emplace(dynabuf.prepare(size));
+            }
+            catch(std::length_error const&)
+            {
+                // Convert the exception to an error
+                ec = error::buffer_overflow;
+                return;
+            }
+            auto const bytes_transferred =
+                stream.read_some(*mb, ec);
+            if(ec == boost::asio::error::eof)
+            {
+                dynabuf.commit(bytes_transferred);
+                // Caller will see eof on next read.
+                ec = {};
+                parser.write_eof(ec);
+                if(ec)
+                    return;
+                BOOST_ASSERT(! parser.need_more());
+                BOOST_ASSERT(parser.is_done());
+            }
+            else if(! ec)
+            {
+                dynabuf.commit(bytes_transferred);
+            }
+            else
+            {
+                return;
+            }
         }
-        catch(std::length_error const&)
-        {
-            ec = error::buffer_overflow;
+    }
+    else if(! parser.is_done())
+    {
+        // Apply any remaining bytes in dynabuf
+        //
+        parser.consume(dynabuf, ec);
+        if(ec)
             return;
-        }
-        dynabuf.commit(stream.read_some(*mb, ec));
+
+        // Parser wants a direct read
+        //
+        auto const mb = parser.prepare(
+            dynabuf, 65536); // magic number?
+        auto const bytes_transferred =
+            stream.read_some(mb, ec);
         if(ec == boost::asio::error::eof)
         {
+            dynabuf.commit(bytes_transferred);
             // Caller will see eof on next read.
             ec = {};
             parser.write_eof(ec);
             if(ec)
                 return;
             BOOST_ASSERT(! parser.need_more());
-            break;
+            BOOST_ASSERT(parser.is_done());
         }
-        if(ec)
+        else if(! ec)
+        {
+            parser.commit(bytes_transferred);
+        }
+        else
+        {
             return;
+        }
     }
 }
-
-template<
-    class SyncReadStream,
-    class DynamicBuffer,
-    bool isRequest,
-    class Derived>
-void
-parse_body_direct(
-    SyncReadStream& stream,
-    DynamicBuffer& dynabuf,
-    basic_parser<isRequest, Derived>& parser,
-    error_code& ec)
-{
-    switch(parser.body_style())
-    {
-    case 0: // content-length
-    {
-
-        break;
-    }
-
-    case 1: // eof
-    {
-        break;
-    }
-
-    case 2: // chunked
-    {
-        break;
-    }
-    }
-}
-#endif
 
 class design_test : public beast::unit_test::suite
 {
