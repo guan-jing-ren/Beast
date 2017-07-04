@@ -2,19 +2,24 @@
 
 cmake_minimum_required (VERSION 3.5.2)
 
-project (Beast)
+project (Beast VERSION 69)
 
 set_property (GLOBAL PROPERTY USE_FOLDERS ON)
 
 if (MSVC)
-    # /wd4244 /wd4127
+    set (CMAKE_VERBOSE_MAKEFILE FALSE)
+
     add_definitions (-D_WIN32_WINNT=0x0601)
     add_definitions (-D_SCL_SECURE_NO_WARNINGS=1)
     add_definitions (-D_CRT_SECURE_NO_WARNINGS=1)
 
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4100 /wd4244 /wd4251 /MP /W4 /bigobj")
-    set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Ob2 /Oi /Ot /GL")
-    set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /Oi /Ot")
+    set (Boost_USE_STATIC_LIBS ON)
+    set (Boost_USE_STATIC_RUNTIME ON)
+
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /W4 /bigobj /permissive-")
+    set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+    set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Ob2 /Oi /Ot /GL /MT")
+    set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /Oi /Ot /MT")
 
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SAFESEH:NO")
     set (CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
@@ -28,11 +33,15 @@ if (MSVC)
     set (CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO ${replacement_flags})
 
 else()
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads)
+    set (THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package (Threads)
 
-    set(CMAKE_CXX_FLAGS
+    set( CMAKE_CXX_FLAGS
       "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wextra -Wpedantic -Wno-unused-parameter")
+
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wrange-loop-analysis")
+    endif ()
 endif()
 
 #-------------------------------------------------------------------------------
@@ -42,30 +51,14 @@ endif()
 
 option (Boost_USE_STATIC_LIBS "Use static libraries for boost" ON)
 
-set (Boost_NO_SYSTEM_PATHS ON)
-set (Boost_USE_MULTITHREADED ON)
+set (BOOST_COMPONENTS coroutine context filesystem program_options system thread)
+find_package (Boost 1.58.0 REQUIRED COMPONENTS ${BOOST_COMPONENTS})
 
-unset (Boost_INCLUDE_DIR CACHE)
-unset (Boost_LIBRARY_DIRS CACHE)
-find_package (Boost REQUIRED COMPONENTS
-    coroutine
-    context
-    filesystem
-    program_options
-    system
-    thread
-    )
+link_directories(${Boost_LIBRARY_DIRS})
 
-include_directories (SYSTEM ${Boost_INCLUDE_DIRS})
-link_libraries (${Boost_LIBRARIES})
-
-if (MSVC)
-    add_definitions (-DBOOST_ALL_NO_LIB) # disable autolinking
-elseif (MINGW)
+if (MINGW)
     link_libraries(ws2_32 mswsock)
 endif()
-
-add_definitions (-DBOOST_COROUTINES_NO_DEPRECATION_WARNING=1) # for asio
 
 #-------------------------------------------------------------------------------
 #
@@ -83,15 +76,23 @@ endif()
 
 find_package(OpenSSL)
 
+if (OPENSSL_FOUND)
+    add_definitions (-DBEAST_USE_OPENSSL=1)
+
+else()
+    add_definitions (-DBEAST_USE_OPENSSL=0)
+    message("OpenSSL not found.")
+endif()
+
 #
 #-------------------------------------------------------------------------------
 
 function(DoGroupSources curdir rootdir folder)
-    file(GLOB children RELATIVE ${PROJECT_SOURCE_DIR}/${curdir} ${PROJECT_SOURCE_DIR}/${curdir}/*)
-    foreach(child ${children})
-        if(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/${curdir}/${child})
+    file (GLOB children RELATIVE ${PROJECT_SOURCE_DIR}/${curdir} ${PROJECT_SOURCE_DIR}/${curdir}/*)
+    foreach (child ${children})
+        if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/${curdir}/${child})
             DoGroupSources(${curdir}/${child} ${rootdir} ${folder})
-        elseif(${child} STREQUAL "CMakeLists.txt")
+        elseif (${child} STREQUAL "CMakeLists.txt")
             source_group("" FILES ${PROJECT_SOURCE_DIR}/${curdir}/${child})
         else()
             string(REGEX REPLACE ^${rootdir} ${folder} groupname ${curdir})
@@ -102,34 +103,62 @@ function(DoGroupSources curdir rootdir folder)
 endfunction()
 
 function(GroupSources curdir folder)
-    DoGroupSources(${curdir} ${curdir} ${folder})
+    DoGroupSources (${curdir} ${curdir} ${folder})
 endfunction()
 
 #-------------------------------------------------------------------------------
 
 if ("${VARIANT}" STREQUAL "coverage")
-    set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-    set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov")
-elseif ("${VARIANT}" STREQUAL "asan")
-    set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
-    set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
-elseif ("${VARIANT}" STREQUAL "usan")
-    set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fno-omit-frame-pointer")
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined")
-    set(CMAKE_BUILD_TYPE RELWITHDEBINFO)
+    if (MSVC)
+    else()
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+        set (CMAKE_BUILD_TYPE RELWITHDEBINFO)
+        set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov")
+    endif()
+
+elseif ("${VARIANT}" STREQUAL "ubasan")
+    if (MSVC)
+    else()
+        set (CMAKE_CXX_FLAGS
+          "${CMAKE_CXX_FLAGS} -DBEAST_NO_SLOW_TESTS=1 -funsigned-char -fno-omit-frame-pointer -fsanitize=address,undefined -fsanitize-blacklist=${PROJECT_SOURCE_DIR}/scripts/blacklist.supp")
+        set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+        set (CMAKE_BUILD_TYPE RELWITHDEBINFO)
+    endif()
+
 elseif ("${VARIANT}" STREQUAL "debug")
-    set(CMAKE_BUILD_TYPE DEBUG)
+    set (CMAKE_BUILD_TYPE DEBUG)
+
 elseif ("${VARIANT}" STREQUAL "release")
-    set(CMAKE_BUILD_TYPE RELEASE)
+    set (CMAKE_BUILD_TYPE RELEASE)
+
 endif()
 
+#-------------------------------------------------------------------------------
+#
+# Library interface
+#
+
+add_library (${PROJECT_NAME} INTERFACE)
+target_link_libraries (${PROJECT_NAME} INTERFACE ${Boost_SYSTEM_LIBRARY})
+if (NOT MSVC)
+    target_link_libraries (${PROJECT_NAME} INTERFACE Threads::Threads)
+endif()
+set_property (TARGET ${PROJECT_NAME} PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIRS})
+set_property (TARGET ${PROJECT_NAME} PROPERTY  INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${Boost_INCLUDE_DIRS})
+target_compile_definitions (${PROJECT_NAME} INTERFACE BOOST_COROUTINES_NO_DEPRECATION_WARNING=1)
+
+#-------------------------------------------------------------------------------
+#
+# Tests and examples
+#
+
+include_directories (.)
 include_directories (extras)
 include_directories (include)
+
+if (OPENSSL_FOUND)
+    include_directories (${OPENSSL_INCLUDE_DIR})
+endif()
 
 set(ZLIB_SOURCES
     ${PROJECT_SOURCE_DIR}/test/zlib/zlib-1.2.8/crc32.h
@@ -159,20 +188,18 @@ file(GLOB_RECURSE BEAST_INCLUDES
     ${PROJECT_SOURCE_DIR}/include/beast/*.ipp
 )
 
+file(GLOB_RECURSE COMMON_INCLUDES
+    ${PROJECT_SOURCE_DIR}/example/common/*.hpp
+  )
+
 file(GLOB_RECURSE EXTRAS_INCLUDES
     ${PROJECT_SOURCE_DIR}/extras/beast/*.hpp
     ${PROJECT_SOURCE_DIR}/extras/beast/*.ipp
 )
 
-add_subdirectory (examples)
-if (NOT OPENSSL_FOUND)
-    message("OpenSSL not found. Not building examples/ssl")
-else()
-    add_subdirectory (examples/ssl)
-endif()
-
 add_subdirectory (test)
-add_subdirectory (test/core)
-add_subdirectory (test/http)
-add_subdirectory (test/websocket)
-add_subdirectory (test/zlib)
+
+if ((NOT "${VARIANT}" STREQUAL "coverage") AND
+    (NOT "${VARIANT}" STREQUAL "ubasan"))
+    add_subdirectory (example)
+endif()

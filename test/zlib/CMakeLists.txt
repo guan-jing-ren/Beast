@@ -2,6 +2,7 @@
 
 GroupSources(extras/beast extras)
 GroupSources(include/beast beast)
+
 GroupSources(test/zlib "/")
 
 if (MSVC)
@@ -19,8 +20,8 @@ add_executable (zlib-tests
     inflate_stream.cpp
 )
 
-if (NOT WIN32)
-    target_link_libraries(zlib-tests ${Boost_LIBRARIES} Threads::Threads)
-else()
-    target_link_libraries(zlib-tests ${Boost_LIBRARIES})
-endif()
+target_link_libraries(zlib-tests
+    Beast
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
+    )

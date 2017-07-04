@@ -1,0 +1,137 @@
+[/
+    Copyright (c) 2013-2017 Vinnie Falco (vinnie dot falco at gmail dot com)
+
+    Distributed under the Boost Software License, Version 1.0. (See accompanying
+    file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+]
+
+[section:Fields Fields]
+
+An instance of [*Fields] is a container for holding HTTP header fields
+and their values. The implementation also calls upon the container to
+store the request target and non-standard strings for method and obsolete
+reason phrase as needed. Types which meet these requirements can always
+be serialized.
+
+In this table:
+
+* `X` denotes a type that meets the requirements of [*Fields].
+
+* `R` denotes a type meeting the requirements of __FieldsReader__.
+
+* `a` denotes a value of type `X`.
+
+* `c` denotes a (possibly const) value of type `X`.
+
+* `s` is a value of type [link beast.ref.beast__string_view `string_view`].
+
+* `b` is a value of type `bool`
+
+* `n` is a value of type `boost::optional<std::uint64_t>`.
+
+[table Fields requirements
+[[expression][type][semantics, pre/post-conditions]]
+[
+    [`X::reader`]
+    [`R`]
+    [
+        A type which meets the requirements of __FieldsReader__.
+    ]
+][
+    [`c.get_method_impl()`]
+    [`string_view`]
+    [
+        Returns the method text.
+        The implementation only calls this function for request
+        headers when retrieving the method text previously set
+        with a call to `set_method_impl` using a non-empty string.
+    ]
+][
+    [`c.get_target_impl()`]
+    [`string_view`]
+    [
+        Returns the target string.
+        The implementation only calls this function for request headers.
+    ]
+][
+    [`c.get_reason_impl()`]
+    [`string_view`]
+    [
+        Returns the obsolete request text.
+        The implementation only calls this for response headers when
+        retrieving the reason text previously set with a call to
+        `set_reason_impl` using a non-empty string.
+    ]
+][
+    [`a.set_method_impl(s)`]
+    []
+    [
+        Stores a copy of `s` as the method text, or erases the previously
+        stored value if `s` is empty.
+        The implementation only calls this function for request headers.
+        This function may throw `std::invalid_argument` if the operation
+        is not supported by the container.
+    ]
+][
+    [`a.set_target_impl(s)`]
+    []
+    [
+        Stores a copy of `s` as the target, or erases the previously
+        stored value if `s` is empty.
+        The implementation only calls this function for request headers.
+        This function may throw `std::invalid_argument` if the operation
+        is not supported by the container.
+    ]
+][
+    [`a.set_reason_impl(s)`]
+    []
+    [
+        Stores a copy of `s` as the reason text, or erases the previously
+        stored value of the reason text if `s` is empty.
+        The implementation only calls this function for request headers.
+        This function may throw `std::invalid_argument` if the operation
+        is not supported by the container.
+    ]
+][
+    [`a.prepare_payload_impl(b,n)`]
+    []
+    [
+        Adjusts the Content-Length and Transfer-Encoding fields to
+        account for the payload metadata indicated by `b` and `n` as
+        follows:
+
+        * If `b` is `true`, the chunked Transfer-Encoding should be applied
+        to the end of the list of encodings if it is not already there
+        or if the field was not present. Any Content-Length fields should
+        be removed.
+
+        * If `b` is `false` and `n` contains a value, set the Content-Length
+        field to `*n`, replacing any previous Content-Length fields. Remove
+        the chunked encoding from the end of the Transfer-Encoding field
+        if the field is present ahd chunked is the last encoding.
+
+        * If `b` is `false` and `n` contains no value, remove all Content-Length
+        fields, and remove the chunked encoding from the end of the
+        Transfer-Encoding field if the field is present ahd chunked is the
+        last encoding.
+    ]
+][
+    [`is_fields<X>`]
+    [`std::true_type`]
+    [
+        An alias for `std::true_type` for `X`, otherwise an alias
+        for `std::false_type`.
+    ]
+]
+]
+
+[heading Exemplar]
+
+[concept_Fields]
+
+[heading Models]
+
+* [link beast.ref.beast__http__basic_fields `basic_fields`]
+* [link beast.ref.beast__http__fields `fields`]
+
+[endsect]
